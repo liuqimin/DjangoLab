@@ -1,9 +1,15 @@
+import io
 from django.shortcuts import render
 from rest_framework.generics import GenericAPIView
 from rest_framework import mixins
-from .models import Book,Author,Category
+from .models import Book,Author,Category,Sales
 from .serializers import BookSerializers,AuthorSerializers,CategorySerializers
-
+from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser
+from rest_framework.response import Response
+from rest_framework import status
+import pandas as pd
+from django.http import HttpResponse
 # Create your views here.
 
 
@@ -100,3 +106,68 @@ class CategoryRetrieveCreateView(mixins.RetrieveModelMixin,
     
     def delete(self, request, *args, **kwargs):
         return self.destroy(request)
+    
+
+
+
+# 上传csv文件并用pandas分析
+
+class CSVUploadAPIView(APIView):
+    parser_classes = [MultiPartParser]
+    '''
+    parser_classes 是 用来指定请求的数据格式解析器parser的。
+
+    MultiPartParser 是一种 专门用于解析表单上传文件如 CSV、图片、Excel 的解析器。
+    POST /api/upload-csv/
+    Content-Type: multipart/form-data
+    Body:
+    file: my_data.csv
+    DRF 默认使用的是 JSONParser（只解析 application/json），那就没办法处理上传的文件了
+    '''
+    def post(self, request, *args, **kwargs):
+        file = request.FILES.get('file')
+        if not file or not file.name.endswith('.csv'):
+            return Response({'error':'please upload a valid csv file'}, 
+                    status=status.HTTP_400_BAD_REQUEST)
+        try:
+            df = pd.read_csv(file)
+            summary = df.describe.to_dict()
+            return Response({'summary':summary})
+        except Exception as e:
+            return Response({'error': str(e)}, 
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+                            
+
+#带下载
+class ExportExcelAPIView(APIView):
+    def get(sefl, request, *args, **kwargs):
+        # 模拟data
+        data = [{'name':'alice','score':90}, {'name':'Bob','score':75}]
+        df = pd.DataFrame(data)
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='Report')
+
+        output.seek(0)
+        response = HttpResponse(
+            output.read(),
+            content_type = 'applicaton/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+        )
+        response['Content-Disposition'] = 'attachment: filename="report.xlsx"'
+        return response
+    
+
+
+class SalesSummaryAPIView(APIView):
+    def get(self, request, *args, **kwargs):
+        sales_data = Sales.objects.values('product','quantity','date')
+        df = pd.DataFrame(sales_data)
+        if df.empty:
+            return Response({'summary':{}})
+        result = df.groupby('product')['quantity'].sum().to_dict()
+
+        return Response({'sales_summary': result})

@@ -69,7 +69,11 @@ class Book(AuditModel):
 
 
 
-
+class Sales(models.Model):
+    product = models.CharField(max_length=100)
+    quantity = models.IntegerField()
+    date = models.DateField()
+    
 
 
 
